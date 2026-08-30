@@ -33,10 +33,10 @@ import {
 import {
   areUiSessionKeysEquivalent,
   isUiSelectedGlobalSessionKey,
+  uiConversationMatches,
   isUiGlobalSessionKey,
   normalizeAgentId,
   parseAgentSessionKey,
-  resolveUiDefaultAgentId,
   resolveUiGlobalAliasAgentId,
   resolveUiSelectedGlobalAgentId,
   resolveUiSelectedSessionAgentId,
@@ -758,35 +758,12 @@ function setChatError(state: ChatState, error: string | null) {
   state.chatError = message;
 }
 
-function chatScopedEventAgentScopeMatches(
-  state: ChatState,
-  sessionKey: string,
-  agentId?: string | null,
-): boolean {
-  if (!isUiSelectedGlobalSessionKey(state, state.sessionKey) || !isUiGlobalSessionKey(sessionKey)) {
-    return true;
-  }
-  const payloadAgentId =
-    typeof agentId === "string" && agentId.trim() ? normalizeAgentId(agentId) : undefined;
-  const selectedAgentId = resolveUiSelectedSessionAgentId(state);
-  return payloadAgentId
-    ? selectedAgentId !== undefined && payloadAgentId === selectedAgentId
-    : selectedAgentId === undefined || selectedAgentId === resolveUiDefaultAgentId(state);
-}
-
 export function chatScopedEventSessionMatches(
   state: ChatState,
   sessionKey: string,
   agentId?: string | null,
 ): boolean {
-  if (areUiSessionKeysEquivalent(sessionKey, state.sessionKey)) {
-    return chatScopedEventAgentScopeMatches(state, sessionKey, agentId);
-  }
-  return (
-    isUiGlobalSessionKey(sessionKey) &&
-    isUiSelectedGlobalSessionKey(state, state.sessionKey) &&
-    chatScopedEventAgentScopeMatches(state, sessionKey, agentId)
-  );
+  return uiConversationMatches(state, state.sessionKey, sessionKey, agentId);
 }
 
 function normalizeSubscriptionKey(value: string | null | undefined): string | null {
@@ -798,11 +775,7 @@ function resolveSelectedGlobalAliasAgentId(
   state: ChatSessionMessageSubscriptionState,
   key: string | null | undefined,
 ): string | null {
-  const row = state.sessionsResult?.sessions.find((session) => session.key === key);
-  return resolveUiGlobalAliasAgentId(state, key, {
-    rowKind: row?.kind,
-    requireGlobalRowForMainAlias: true,
-  });
+  return resolveUiGlobalAliasAgentId(state, key);
 }
 
 function resolveSelectedGlobalAgentId(state: ChatSessionMessageSubscriptionState): string {
