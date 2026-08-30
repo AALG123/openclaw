@@ -6,14 +6,24 @@ import type { SessionToolOverrides } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { BundleMcpConfig, BundleMcpServerConfig } from "../../plugins/bundle-mcp.js";
 import { isValidAgentId, normalizeAgentId } from "../../routing/session-key.js";
+import { getOrCreateSessionMcpRuntime } from "../agent-bundle-mcp-manager-api.js";
+import type { PreparedNativeMcpPolicy } from "../agent-bundle-mcp-types.js";
 import { isRecord } from "../bundle-mcp-adapter.js";
 import {
   applyCodexSessionMcpToolDenials,
   buildCodexMcpServersConfig,
   normalizeCodexMcpServerConfig,
 } from "../codex-mcp-config.js";
+import { resolveConversationCapabilityProfile } from "../conversation-capability-profile.js";
+import type { EmbeddedRunAttemptParams } from "../embedded-agent-runner/run/types.js";
 import { requiresMcpBearerProjection, resolveMcpBearerBundleConfig } from "../mcp-auth-profile.js";
 import { partitionMcpServersByConnectionScope } from "../mcp-connection-resolver.js";
+import {
+  applyPreparedNativeMcpPolicy,
+  prepareNativeMcpPolicy,
+  requiresPreparedNativeMcpPolicy,
+} from "../native-mcp-policy.js";
+import { resolveSandboxRuntimeStatus } from "../sandbox/runtime-status.js";
 import { serializeTomlInlineValue } from "./toml-inline.js";
 
 // Mutable JSON shape structurally compatible with the bundled Codex
@@ -36,6 +46,7 @@ type CodexUserMcpServersProjectionOptions = {
   allowLiteralOAuthProjection?: boolean;
   onServerUnavailable?: (serverName: string, error: unknown) => void;
   toolOverrides?: Pick<SessionToolOverrides, "mcpServers" | "mcpToolsDeny">;
+  preparedNativeMcpPolicy?: PreparedNativeMcpPolicy;
 };
 
 function normalizeAgentIds(value: unknown): string[] {
@@ -177,6 +188,12 @@ export async function buildCodexUserMcpServersThreadConfigPatchForRuntime(
       );
     }),
   ) as BundleMcpConfig["mcpServers"];
+  if (options?.preparedNativeMcpPolicy) {
+    allowedServers = applyPreparedNativeMcpPolicy(
+      { mcpServers: allowedServers },
+      options.preparedNativeMcpPolicy,
+    ).mcpServers;
+  }
   if (Object.keys(allowedServers).length === 0) {
     return undefined;
   }
@@ -217,4 +234,111 @@ export async function buildCodexUserMcpServersThreadConfigPatchForRuntime(
     ]),
   );
   return Object.keys(mcp_servers).length === 0 ? undefined : { mcp_servers };
+}
+
+/** Prepares canonical native MCP policy and projects it into Codex before thread creation. */
+export async function buildCodexUserMcpServersThreadConfigPatchForRun(params: {
+  run: EmbeddedRunAttemptParams;
+  cwd: string;
+  agentId?: string;
+  allowLiteralOAuthProjection?: boolean;
+  onServerUnavailable?: (serverName: string, error: unknown) => void;
+  warn?: (message: string) => void;
+}): Promise<{ mcp_servers: CodexThreadConfigObject } | undefined> {
+  const run = params.run;
+  const agentId = params.agentId ?? run.agentId;
+  const policySessionKey = run.sandboxSessionKey ?? run.sessionKey;
+  const sandboxStatus = resolveSandboxRuntimeStatus({
+    cfg: run.config,
+    sessionKey: policySessionKey,
+    agentId,
+  });
+  const capabilityProfile = resolveConversationCapabilityProfile({
+    config: run.config,
+    sessionKey: policySessionKey,
+    runSessionKey:
+      run.sessionKey && run.sessionKey !== policySessionKey ? run.sessionKey : undefined,
+    sessionId: run.sessionId,
+    runId: run.runId,
+    agentId,
+    agentDir: run.agentDir,
+    agentAccountId: run.agentAccountId,
+    messageProvider: run.messageProvider ?? run.messageChannel,
+    messageChannel: run.messageChannel,
+    chatType: run.chatType,
+    messageTo: run.messageTo,
+    messageThreadId: run.messageThreadId,
+    currentChannelId: run.currentChannelId,
+    currentMessagingTarget: run.currentMessagingTarget,
+    currentThreadTs: run.currentThreadTs,
+    currentMessageId: run.currentMessageId,
+    groupId: run.groupId,
+    groupChannel: run.groupChannel,
+    groupSpace: run.groupSpace,
+    memberRoleIds: run.memberRoleIds,
+    spawnedBy: run.spawnedBy,
+    senderId: run.senderId,
+    senderName: run.senderName,
+    senderUsername: run.senderUsername,
+    senderE164: run.senderE164,
+    senderIsOwner: run.senderIsOwner,
+    modelProvider: run.provider,
+    modelId: run.modelId,
+    modelApi: run.model?.api,
+    modelContextWindowTokens: run.model?.contextWindow,
+    modelHasVision: run.model?.input?.includes("image") ?? false,
+    workspaceDir: run.workspaceDir,
+    cwd: params.cwd,
+    skillsSnapshot: run.skillsSnapshot,
+    sandboxToolPolicy: sandboxStatus.sandboxed ? sandboxStatus.toolPolicy : undefined,
+    runtimeToolAllowlist: run.toolsAllow,
+    inheritRuntimeToolAllowlist: true,
+    runtimePluginToolGrant: run.runtimePluginToolGrant,
+    inputProvenance: run.inputProvenance,
+    trustedInternalHandoff: run.trustedInternalHandoff,
+    scheduledToolPolicy: run.scheduledToolPolicy,
+  });
+  const configuredMcpServers = normalizeConfiguredMcpServers(run.config?.mcp?.servers);
+  if (
+    !requiresPreparedNativeMcpPolicy({
+      capabilityProfile,
+      runtimeToolsAllow: run.toolsAllow,
+      mcpServers: configuredMcpServers,
+    })
+  ) {
+    return await buildCodexUserMcpServersThreadConfigPatchForRuntime(run.config, {
+      agentId,
+      agentDir: run.agentDir,
+      allowLiteralOAuthProjection: params.allowLiteralOAuthProjection,
+      onServerUnavailable: params.onServerUnavailable,
+      toolOverrides: run.toolOverrides,
+    });
+  }
+  const runtime = await getOrCreateSessionMcpRuntime({
+    sessionId: run.sessionId,
+    sessionKey: run.sessionKey,
+    workspaceDir: run.workspaceDir,
+    agentDir: run.agentDir,
+    cfg: run.config,
+    requesterSenderId: run.senderId,
+    agentAccountId: run.agentAccountId,
+    messageChannel: run.messageChannel,
+    toolOverrides: run.toolOverrides,
+  });
+  const preparedNativeMcpPolicy = await prepareNativeMcpPolicy({
+    runtime,
+    config: run.config,
+    workspaceDir: run.workspaceDir,
+    capabilityProfile,
+    runtimeToolsAllow: run.toolsAllow,
+    warn: params.warn ?? (() => {}),
+  });
+  return await buildCodexUserMcpServersThreadConfigPatchForRuntime(run.config, {
+    agentId,
+    agentDir: run.agentDir,
+    allowLiteralOAuthProjection: params.allowLiteralOAuthProjection,
+    onServerUnavailable: params.onServerUnavailable,
+    toolOverrides: run.toolOverrides,
+    preparedNativeMcpPolicy,
+  });
 }

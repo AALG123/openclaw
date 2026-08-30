@@ -25,6 +25,7 @@ export function normalizeMcpToolCatalog(
 ): {
   tools: Tool[];
   deniedTools: Tool[];
+  excludedTools: Tool[];
   metadata: McpToolCatalogMetadata;
 } {
   const canonicalNames = tools.map((tool) => tool.name.trim());
@@ -37,6 +38,7 @@ export function normalizeMcpToolCatalog(
 
   const included: Tool[] = [];
   const deniedTools: Tool[] = [];
+  const excludedTools: Tool[] = [];
   const resultValidators = new Map<string, McpToolResultValidator>();
   for (const [index, sourceTool] of tools.entries()) {
     const toolName = canonicalNames[index] ?? "";
@@ -51,6 +53,7 @@ export function normalizeMcpToolCatalog(
     }
     const disposition = classify(toolName);
     if (disposition === "exclude") {
+      excludedTools.push({ ...sourceTool, name: toolName });
       continue;
     }
     const tool = { ...sourceTool, name: toolName };
@@ -86,6 +89,7 @@ export function normalizeMcpToolCatalog(
 
   return {
     tools: included,
+    excludedTools,
     metadata: {
       validatorForCall(toolName) {
         return resultValidators.get(toolName);

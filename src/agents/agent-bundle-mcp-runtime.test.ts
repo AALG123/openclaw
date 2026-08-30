@@ -4415,6 +4415,23 @@ describe("requester-scoped MCP connection resolution", () => {
               fallbackDescription: "send",
             },
           ],
+          policyTools: [
+            {
+              serverName,
+              safeServerName: safe,
+              toolName: "send",
+              inputSchema: { type: "object", properties: {} },
+              fallbackDescription: "send",
+            },
+            {
+              serverName,
+              safeServerName: safe,
+              toolName: "delete",
+              inputSchema: { type: "object", properties: {} },
+              fallbackDescription: "delete",
+              excludedByConfiguredFilter: true,
+            },
+          ],
         }),
       };
     };
@@ -4456,6 +4473,13 @@ describe("requester-scoped MCP connection resolution", () => {
     // Merge preserves precomputed names (no further re-suffix).
     const merged = testing.mergeMcpToolCatalogs([catalogA, catalogB]);
     expect(merged.servers["mail.prod"]?.safeServerName).toBe("mail-prod");
+    expect(
+      new Set(
+        merged.policyTools
+          ?.filter((tool) => tool.toolName === "delete")
+          .map((tool) => tool.safeServerName),
+      ),
+    ).toEqual(new Set(["mail-prod", "mail-prod-2"]));
 
     await manager.disposeAll();
   });

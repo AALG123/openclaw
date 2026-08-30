@@ -50,6 +50,7 @@ describe("normalizeMcpToolCatalog", () => {
     );
 
     expect(normalized.tools.map((entry) => entry.name)).toEqual(["healthy"]);
+    expect(normalized.excludedTools.map((entry) => entry.name)).toEqual(["excluded"]);
     expect(normalized.metadata.validatorForCall("healthy")).toBeTypeOf("function");
     expect(normalized.metadata.validatorForCall("excluded")).toBeUndefined();
   });
