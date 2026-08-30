@@ -2002,6 +2002,7 @@
                       "providers/deepgram",
                       "providers/elevenlabs",
                       "providers/fish-audio",
+                      "providers/gandr",
                       "providers/gradium",
                       "providers/inworld",
                       "providers/senseaudio"
