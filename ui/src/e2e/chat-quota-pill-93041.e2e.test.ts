@@ -432,6 +432,16 @@ suite.define(() => {
       const gateway = await installMockGateway(page, {
         assistantAgentId: "main",
         defaultAgentId: "main",
+        // Selecting Work opens its main session outside the global-only roster.
+        // Its transcript identifies the provider whose account quota is under test.
+        historyMessages: [
+          {
+            role: "assistant",
+            provider: "openai",
+            content: [{ type: "text", text: "Ready to help." }],
+            timestamp: baseTime,
+          },
+        ],
         deferredMethods: ["models.authStatus", "models.authStatus", "agent.identity.get"],
         methodResponses: {
           "agent.identity.get": {
